@@ -1,0 +1,22 @@
+#!/usr/bin/env ruby
+
+require "pry"
+require "thor"
+
+class RPKCLI < Thor
+  desc "produce TOPIC", "produce messages to TOPIC"
+  option :interval_in_seconds
+  def produce_messages(topic = nil)
+    unless topic
+      puts "Please provide a topic e.g. bundle exec produce TOPIC"
+      exit
+    end
+
+    while true
+      puts `echo '{"name": "redpanda"}' | rpk topic produce #{topic}`
+      sleep options[:interval_in_seconds] ? options[:interval_in_seconds].to_f : 1
+    end
+  end
+end
+
+RPKCLI.start(ARGV)
