@@ -57,7 +57,7 @@ class PandaProxyCLI < Thor
       end
       offsets_to_commit = []
       max_partition_offsets.each do |message|
-        offsets_to_commit << message.except("key", "value")
+        offsets_to_commit << message.reject { |key, _| ["key", "value"].include?(key) }
       end
       response = conn.post("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}/offsets") do |req|
         req.body = {
