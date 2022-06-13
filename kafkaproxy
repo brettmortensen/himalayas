@@ -1,0 +1,144 @@
+#!/usr/bin/env ruby
+
+require "faraday"
+require "faraday/net_http"
+require "json"
+require "pry"
+require "thor"
+
+::Faraday.default_adapter = :net_http
+
+class KafkaProxyCLI < Thor
+  @@running = true
+
+  desc "create_consumer", "Create a consumer with --consumer_group_name and --consumer_name options"
+  option :consumer_group_name
+  option :consumer_name
+  def create_consumer
+    unless options[:consumer_group_name] && options[:consumer_name]
+      puts "Please ensure the following options are set: --consumer_group_name NAME --consumer_name NAME"
+      exit
+    end
+
+    response = conn.post("/consumers/#{options[:consumer_group_name]}") do |req|
+      req.headers["Content-Type"] = "application/vnd.kafka.v2+json"
+      req.body = {
+        "format" => "json",
+        "name" => "#{options[:consumer_name]}",
+        "auto.offset.reset" => "latest",
+        "auto.commit.enable" => "false",
+        "fetch.min.bytes" => "1",
+        "consumer.request.timeout.ms" => "10000"
+      }.to_json
+    end
+    puts "Create consumer status: #{response.status}"
+  end
+
+  desc "consume_messages", "Consume messages with --consumer_group_name, --consumer_name, and --interval_in_seconds options"
+  option :consumer_group_name
+  option :consumer_name
+  def consume_messages
+    unless options[:consumer_group_name] && options[:consumer_name]
+      puts "Please ensure the following options are set: --consumer_group_name NAME --consumer_name NAME"
+      exit
+    end
+
+    while @@running
+      response = conn.get("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}/records") do |req|
+        req.headers["Accept"] = "application/vnd.kafka.json.v2+json"
+      end
+      messages = response.body
+      puts messages
+
+      parsed_messages = ::JSON.parse(messages)
+      messages_grouped_by_partition = parsed_messages.group_by{|m| m["partition"]}
+      max_partition_offsets = []
+      messages_grouped_by_partition.each do |messages|
+        max_partition_offsets << messages[1].max_by{|m| m["offset"]}
+      end
+      offsets_to_commit = []
+      max_partition_offsets.each do |message|
+        offsets_to_commit << message.reject { |key, _| ["key", "value"].include?(key) }
+      end
+      response = conn.post("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}/offsets") do |req|
+        req.headers["Content-Type"] = "application/vnd.kafka.v2+json"
+        req.body = {
+          offsets: offsets_to_commit
+        }.to_json
+      end
+
+      break unless options[:interval_in_seconds]
+      sleep options[:interval_in_seconds] ? options[:interval_in_seconds].to_f : 1
+    end
+  end
+
+  desc "delete_consumer", "Delete a consumer with --consumer_group_name and --consumer_name options"
+  option :consumer_group_name
+  option :consumer_name
+  def delete_consumer
+    unless options[:consumer_group_name] && options[:consumer_name]
+      puts "Please ensure the following options are set: --consumer_group_name NAME --consumer_name NAME"
+      exit
+    end
+
+    response = conn.delete("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}")
+    puts "\nDelete consumer status: #{response.status}"
+  end
+
+  no_commands do
+    def conn
+      @conn ||= ::Faraday.new(
+        url: "http://localhost:8082",
+        headers: {"Accept" => "application/vnd.kafka.binary.v2+json", "Content-Type" => "application/vnd.kafka.v2+json"}
+      )
+    end
+  end
+
+  desc "(default command)", "Run kafkaproxy script with options"
+  option :consume_messages
+  option :consumer_group_name
+  option :consumer_name
+  option :create_consumer
+  option :delete_consumer
+  option :interval_in_seconds
+  option :subscribe_consumer
+  option :topics
+  def kafkaproxy
+    create_consumer if options[:create_consumer]
+    subscribe_consumer if options[:subscribe_consumer]
+    consume_messages if options[:consume_messages]
+    delete_consumer if options[:delete_consumer]
+  end
+
+  desc "subscribe_consumer", "Subscribe a consumer with --consumer_group_name, --consumer_name, and --topics options"
+  option :consumer_group_name
+  option :consumer_name
+  option :topics
+  def subscribe_consumer
+    unless options[:consumer_group_name] && options[:consumer_name] && options[:topics]
+      puts "Please ensure the following options are set: --consumer_group_name NAME --consumer_name NAME --topics '[\"TOPIC1\", \"TOPIC2\", ...]'"
+      exit
+    end
+
+    response = conn.post("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}/subscription") do |req|
+      req.body = {
+        "topics" => ::JSON.parse(options[:topics])
+      }.to_json
+    end
+    puts "Subscribe consumer status: #{response.status}"
+  end
+
+  def self.running(status)
+    @@running = status
+  end
+
+  default_task :kafkaproxy
+end
+
+[:INT, :QUIT, :TERM].each do |signal|
+  trap(signal) do
+    ::KafkaProxyCLI.running(false)
+  end
+end
+
+::KafkaProxyCLI.start(ARGV)
