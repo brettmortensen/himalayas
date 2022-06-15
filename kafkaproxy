@@ -21,7 +21,6 @@ class KafkaProxyCLI < Thor
     end
 
     response = conn.post("/consumers/#{options[:consumer_group_name]}") do |req|
-      req.headers["Content-Type"] = "application/vnd.kafka.v2+json"
       req.body = {
         "format" => "json",
         "name" => "#{options[:consumer_name]}",
@@ -61,11 +60,11 @@ class KafkaProxyCLI < Thor
         offsets_to_commit << message.reject { |key, _| ["key", "value"].include?(key) }
       end
       response = conn.post("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}/offsets") do |req|
-        req.headers["Content-Type"] = "application/vnd.kafka.v2+json"
         req.body = {
           offsets: offsets_to_commit
         }.to_json
       end
+      puts response.status
 
       break unless options[:interval_in_seconds]
       sleep options[:interval_in_seconds] ? options[:interval_in_seconds].to_f : 1
@@ -89,7 +88,7 @@ class KafkaProxyCLI < Thor
     def conn
       @conn ||= ::Faraday.new(
         url: "http://localhost:8082",
-        headers: {"Accept" => "application/vnd.kafka.binary.v2+json", "Content-Type" => "application/vnd.kafka.v2+json"}
+        headers: {"Accept" => "application/vnd.kafka.v2+json", "Content-Type" => "application/vnd.kafka.v2+json"}
       )
     end
   end
