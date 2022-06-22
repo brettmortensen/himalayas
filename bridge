@@ -8,7 +8,7 @@ require "thor"
 
 ::Faraday.default_adapter = :net_http
 
-class PandaProxyCLI < Thor
+class KafkaProxyCLI < Thor
   @@running = true
 
   desc "create_consumer", "Create a consumer with --consumer_group_name and --consumer_name options"
@@ -24,10 +24,10 @@ class PandaProxyCLI < Thor
       req.body = {
         "format" => "json",
         "name" => "#{options[:consumer_name]}",
-        "auto.offset.reset" => "earliest",
-        "auto.commit.enable" => "false",
-        "fetch.min.bytes" => "1",
-        "consumer.request.timeout.ms" => "10000"
+        "auto.offset.reset" => "latest",
+        "enable.auto.commit" => false,
+        "fetch.min.bytes" => 1,
+        "consumer.request.timeout.ms" => 10000
       }.to_json
     end
     puts "Create consumer status: #{response.status}"
@@ -61,10 +61,10 @@ class PandaProxyCLI < Thor
       end
       response = conn.post("/consumers/#{options[:consumer_group_name]}/instances/#{options[:consumer_name]}/offsets") do |req|
         req.body = {
-          partitions: offsets_to_commit
+          offsets: offsets_to_commit
         }.to_json
       end
-      response.status
+      puts response.status
 
       break unless options[:interval_in_seconds]
       sleep options[:interval_in_seconds] ? options[:interval_in_seconds].to_f : 1
@@ -93,7 +93,7 @@ class PandaProxyCLI < Thor
     end
   end
 
-  desc "(default command)", "Run pandaproxy script with options"
+  desc "(default command)", "Run kafkaproxy script with options"
   option :consume_messages
   option :consumer_group_name
   option :consumer_name
@@ -102,7 +102,7 @@ class PandaProxyCLI < Thor
   option :interval_in_seconds
   option :subscribe_consumer
   option :topics
-  def pandaproxy
+  def kafkaproxy
     create_consumer if options[:create_consumer]
     subscribe_consumer if options[:subscribe_consumer]
     consume_messages if options[:consume_messages]
@@ -131,13 +131,13 @@ class PandaProxyCLI < Thor
     @@running = status
   end
 
-  default_task :pandaproxy
+  default_task :kafkaproxy
 end
 
 [:INT, :QUIT, :TERM].each do |signal|
   trap(signal) do
-    ::PandaProxyCLI.running(false)
+    ::KafkaProxyCLI.running(false)
   end
 end
 
-::PandaProxyCLI.start(ARGV)
+::KafkaProxyCLI.start(ARGV)
